@@ -182,15 +182,15 @@ def train(args, model, device, train_loader, optimizer, epoch):
         enumerate(train_loader), leave=False, desc="training", total=L
     ):  # <-- now it is a distributed dataset
         if args.train_federated:
-            model.send(data.location)  # <-- NEW: send the model to the right location
+            model_ptr = model.send(data.location)  # <-- NEW: send the model to the right location
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
-        output = model(data)
+        output = model_ptr(data)
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
-        if args.train_federated:
-            model.get()  # <-- NEW: get the model back
+        # if args.train_federated:
+        #     model.get()  # <-- NEW: get the model back
         if batch_idx % args.log_interval == 0:
             if args.train_federated:
                 loss = loss.get()  # <-- NEW: get the loss back
@@ -285,9 +285,53 @@ def test(args, model, device, test_loader, epoch):
         )
 
 
+if args.train_federated:
+    class Net(sy.Plan): # TODO: use something better
+        def __init__(self, n_classes=3):
+            super(Net, self).__init__()
+            self.convs = nn.Sequential(
+                nn.Conv2d(1, 16, 3, 1),
+                nn.LeakyReLU(),
+                nn.MaxPool2d(2),
+                nn.Conv2d(16, 32, 3, 1),
+                nn.LeakyReLU(),
+                nn.MaxPool2d(2),
+                nn.Conv2d(32, 64, 3),
+                nn.LeakyReLU(),
+                nn.MaxPool2d(2),
+                nn.Conv2d(64, 128, 3),
+                nn.LeakyReLU(),
+                nn.MaxPool2d(2),
+                nn.Conv2d(128, 128, 3),
+                nn.LeakyReLU(),
+                nn.MaxPool2d(2),
+            )
+            self.classifier = nn.Sequential(
+                nn.Linear(128*5*5, 128),
+                nn.LeakyReLU(),
+                nn.Linear(128, n_classes),
+                nn.LogSoftmax(dim=1)
+            )
+
+        def forward(self, x):
+            x = self.convs(x)
+            x = x.view(-1, 128*5*5)
+            x = self.classifier(x)
+            return x
+
+        def to(self, *args):
+            pass # TODO
+
+
+    model = Net()
+    model.build(torch.ones(12, 1, 224, 224))
+else:
+    model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
+
+
 if __name__ == "__main__":
     # model = Net().to(device)
-    model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
+    # model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
     model.to(device)
